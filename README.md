@@ -1,47 +1,153 @@
 # OpenClaw Studio
 
-> A visual canvas for OpenClaw multi-agent teams — **configure, orchestrate, and debug** on one screen.
+Studio is a standalone prototype for visualizing and editing OpenClaw multi-agent teams from the local `~/.openclaw/` directory.
 
-Studio reads `~/.openclaw/` and renders your agents, delegate permissions, workspace symlinks, and TASK.json execution state as an interactive graph. Click an agent to edit its five config files (`IDENTITY.md` / `SOUL.md` / `AGENTS.md` / `TOOLS.md` / `HEARTBEAT.md`) in a side panel — Cmd+S writes straight to disk, the FileWatcher picks it up, the canvas refreshes.
+The prototype has two purposes:
 
-Closest analogy: n8n / Node-RED / Blueprint-class tools, but for agent teams instead of workflow nodes.
+- prove that a single canvas is useful for configuring, orchestrating, and debugging a team
+- provide a concrete reference for a smaller upstream `Studio` tab in OpenClaw Control UI
 
-This is a **standalone prototype** I built for my own multi-agent setup. The goal is to land a minimum-viable subset of it as a native `Studio` tab in [OpenClaw Control UI](https://github.com/openclaw/openclaw) via upstream PR.
+This README is maintainer-facing. It describes the current prototype behavior and the filesystem model it relies on.
 
-## Status
+## What Studio Reads
 
-Prototype. Works on my machine. Early days — feedback welcome.
+Studio scans `~/.openclaw/` and builds a graph from three sources:
 
-## Why
+1. `openclaw.json`
+   - agent registry
+   - chief → subagent delegation via `subagents.allowAgents`
+2. agent workspaces `~/.openclaw/workspace-{id}/`
+   - `IDENTITY.md`, `SOUL.md`, `AGENTS.md`, `TOOLS.md`, `HEARTBEAT.md`
+   - per-agent output directories under `outputs/{project-id}/`
+3. team directories under the chief workspace
+   - `shared-workspace/projects/{project-id}/`
+   - `TASK.json`
+   - symlinks pointing back to agent outputs
 
-Running a multi-agent OpenClaw team today means cross-referencing 5–10 files across 5 workspaces every time you tune a chief, trace a delegate decision, or debug a dataflow. The data is correctly isolated for runtime, but configuring + orchestrating + debugging a team are three workflows that all need the same cross-file mental model. Studio collapses that into one canvas.
+## Symlink Dataflow Model
 
-## Quick start
+The key collaboration primitive in this prototype is the filesystem, not an API queue.
 
-Requires Node 20+, an existing `~/.openclaw/` directory with at least one agent.
+Each specialist agent writes its own artifacts into its isolated workspace:
+
+```text
+~/.openclaw/workspace-{agent-id}/outputs/{project-id}/...
+```
+
+The team-level shared view lives here:
+
+```text
+~/.openclaw/workspace/{team-name}/shared-workspace/projects/{project-id}/
+```
+
+Files inside `shared-workspace/projects/{project-id}/` are symlinks back to the producing agent workspace. Example:
+
+```text
+shared-workspace/projects/launch-brief/02-trends.md
+  -> ~/.openclaw/workspace-trendspotter/outputs/launch-brief/trends.md
+```
+
+Studio uses those symlinks in three ways:
+
+- renders them as rows inside the project node
+- resolves them to the producing agent (`targetAgent`) and treats them as dataflow evidence
+- reads `TASK.json` step ordering to infer downstream dataflow and sequence edges
+
+In the current prototype, symlinks can be created in two ways:
+
+- by team scripts generated in `src/server/creator.ts`
+- by the prototype UI via drag-to-connect → `SymlinkDialog` → `POST /api/symlink`
+
+That mutation surface is intentionally broader than the proposed upstream v1.
+
+## Graph Model
+
+Studio renders three edge layers:
+
+1. Command
+   - derived from `allowAgents`
+   - shown as `sessions_spawn`
+2. Dataflow
+   - derived from symlinks in `shared-workspace/projects/`
+   - connected using the producing agent plus downstream `TASK.json` steps
+3. Sequence
+   - derived from `TASK.json` step order
+
+## Current Prototype Scope
+
+Current prototype behavior:
+
+- edit the five per-agent markdown files from the side panel
+- read and write project files through resolved symlinks
+- create agents and teams
+- create symlinks from the canvas
+- delete agents
+
+Proposed upstream subset:
+
+- keep the graph read-only
+- keep config-file editing
+- drop prototype-only mutation flows such as drag-to-connect symlink creation
+
+## Code Map
+
+- `src/server/scanner.ts`
+  - scans `~/.openclaw/`
+  - resolves symlinks
+  - builds the `GraphModel`
+- `src/server/creator.ts`
+  - creates agents, teams, scripts, and symlinks
+- `src/server/index.ts`
+  - Express + WebSocket server
+  - `GET /api/graph`
+  - `GET/PUT /api/file`
+  - `POST /api/symlink`
+- `src/server/watcher.ts`
+  - watches relevant filesystem paths and rebroadcasts the graph
+- `src/client/components/Canvas.tsx`
+  - lays out agents and project nodes
+  - owns project visibility, file preview, property panel, and symlink dialog state
+- `src/client/components/SharedWorkspaceNode.tsx`
+  - renders the project/shared-workspace node and symlink rows
+- `src/client/components/PropertyPanel.tsx`
+  - edits per-agent workspace files
+
+## Local Development
+
+Requirements:
+
+- Node 20+
+- an existing `~/.openclaw/` directory with at least one agent
+
+Run:
 
 ```bash
 npm install
 npm run dev
 ```
 
-Opens at `http://localhost:5173` (Vite dev server) with the backend on `http://localhost:3777` (Express + WS, auto-proxied).
+Processes:
 
-## Architecture
+- Vite client on `http://localhost:5173`
+- Express + WebSocket backend on `http://localhost:3777`
 
-- **Backend** (`src/server/`) — Express + WebSocket on port 3777. `scanner.ts` reads `~/.openclaw/`, walks workspaces and team directories, follows symlinks. `watcher.ts` debounces `fs.watch` events and re-broadcasts the graph.
-- **Frontend** (`src/client/`) — React 19 + [`@xyflow/react`](https://reactflow.dev/) canvas. `useGraph` hook subscribes to the WebSocket; `Canvas.tsx` lays out chief/subagents/projects; `PropertyPanel.tsx` edits the 5 config files per agent.
-- **Design tokens** — Mirrors OpenClaw Control UI's theme system (`claw` / `knot` / `dash`, light + dark). Theme and locale choices share `localStorage` keys with Control UI, so switching in either surface propagates on the same machine.
+Build:
 
-## Three edge types
+```bash
+npm run build
+```
 
-1. **Command** (red, solid) — `sessions_spawn` permissions derived from `allowAgents`
-2. **Dataflow** (green, dashed + animated) — symlinks under `shared-workspace/projects/`
-3. **Sequence** (blue, dotted) — execution order from `TASK.json` steps
+Note: at the time of writing, the client build succeeds, but the full build still hits the existing server-side TypeScript `TS5011` config error from `tsconfig.server.json`.
 
-## Upstream proposal
+## Upstreaming Note
 
-The long-term goal is to land a minimum-viable subset of Studio as a native tab in OpenClaw Control UI. Draft RFC and Discussion posts are being prepared. The prototype's scope (drag-to-connect symlink creation, agent create/delete, full mutation surface) is deliberately larger than what will be proposed upstream — the upstream v1 will be read-only graph + config-file editing only, to keep PR review surface small.
+This repository is a prototype, not the intended upstream shape.
+
+The maintainers should treat it as:
+
+- a working reference for the filesystem-backed team model
+- a source of UI and interaction ideas
+- a place to validate scope before proposing smaller PRs to OpenClaw Control UI
 
 ## License
 
