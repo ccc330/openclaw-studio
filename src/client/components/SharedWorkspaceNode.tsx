@@ -14,34 +14,74 @@ function SharedWorkspaceNodeComponent({ data }: NodeProps) {
     ? Object.values(project.task.steps).filter((s) => s.status === 'completed').length
     : 0;
   const totalSteps = project.task ? Object.keys(project.task.steps).length : 0;
+  const progressDone = totalSteps > 0 && completedSteps === totalSteps;
 
   return (
     <div
       style={{
-        background: 'linear-gradient(135deg, rgba(90,245,197,0.06) 0%, rgba(10,15,24,0.95) 100%)',
-        border: '1.5px solid rgba(90,245,197,0.25)',
+        background: 'var(--bg-surface)',
+        border: '1.5px solid var(--accent-dataflow)',
         borderRadius: 'var(--radius-lg)',
-        padding: '12px 16px',
-        minWidth: 200,
-        animation: 'node-enter 0.5s ease-out',
-        boxShadow: '0 0 24px rgba(90,245,197,0.06), 0 4px 12px rgba(0,0,0,0.2)',
+        padding: '14px 16px 12px',
+        minWidth: 240,
+        animation: 'node-enter 0.4s ease-out',
+        boxShadow: '0 0 20px rgba(90,245,197,0.08), 0 4px 12px rgba(0,0,0,0.22)',
+        transition: 'all 0.3s ease',
+        position: 'relative',
       }}
     >
+      <div
+        style={{
+          position: 'absolute',
+          inset: -3,
+          borderRadius: 'calc(var(--radius-lg) + 3px)',
+          border: '1px solid rgba(90,245,197,0.26)',
+          opacity: 0.6,
+          pointerEvents: 'none',
+        }}
+      />
+
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <span style={{ fontSize: 16 }}>{'\u{1F4C1}'}</span>
-        <div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
+        <div
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: 'var(--radius-sm)',
+            background: 'rgba(90,245,197,0.12)',
+            border: '1px solid rgba(90,245,197,0.18)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+            fontSize: 14,
+          }}
+        >
+          {'\u{1F4C1}'}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
               fontFamily: 'var(--font-display)',
               fontWeight: 600,
               fontSize: 12,
               color: 'var(--accent-dataflow)',
+              letterSpacing: '-0.01em',
             }}
           >
             shared-workspace
           </div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-dim)' }}>
+          <div
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 9,
+              color: 'var(--text-dim)',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              marginTop: 2,
+            }}
+          >
             {project.id}
           </div>
         </div>
@@ -50,10 +90,16 @@ function SharedWorkspaceNodeComponent({ data }: NodeProps) {
         {totalSteps > 0 && (
           <div
             style={{
-              marginLeft: 'auto',
               fontFamily: 'var(--font-mono)',
-              fontSize: 10,
-              color: completedSteps === totalSteps ? 'var(--accent-chief)' : 'var(--accent-running)',
+              fontSize: 9,
+              fontWeight: 600,
+              color: progressDone ? 'var(--accent-chief)' : 'var(--accent-running)',
+              background: progressDone ? 'rgba(80,250,123,0.10)' : 'rgba(241,161,53,0.10)',
+              border: `1px solid ${progressDone ? 'rgba(80,250,123,0.24)' : 'rgba(241,161,53,0.24)'}`,
+              borderRadius: '999px',
+              padding: '3px 7px',
+              lineHeight: 1.1,
+              flexShrink: 0,
             }}
           >
             {completedSteps}/{totalSteps}
@@ -61,8 +107,30 @@ function SharedWorkspaceNodeComponent({ data }: NodeProps) {
         )}
       </div>
 
+      {totalSteps > 0 && (
+        <div
+          style={{
+            height: 4,
+            background: 'var(--bg-deep)',
+            borderRadius: 999,
+            overflow: 'hidden',
+            marginBottom: 10,
+          }}
+        >
+          <div
+            style={{
+              height: '100%',
+              width: `${(completedSteps / totalSteps) * 100}%`,
+              background: progressDone ? 'var(--accent-chief)' : 'var(--accent-dataflow)',
+              borderRadius: 999,
+              transition: 'width 0.25s ease',
+            }}
+          />
+        </div>
+      )}
+
       {/* Symlinks */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {project.symlinks.map((sl) => {
           const stepStatus = project.task?.steps
             ? Object.values(project.task.steps).find((s) => s.file === sl.name || s.dir === sl.name)?.status
@@ -79,10 +147,10 @@ function SharedWorkspaceNodeComponent({ data }: NodeProps) {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 6,
-                padding: '3px 8px',
-                background: isActive ? 'var(--bg-elevated)' : 'var(--bg-deep)',
-                border: isActive ? '1px solid var(--accent-info)' : '1px solid transparent',
+                gap: 8,
+                padding: '7px 9px',
+                background: isActive ? 'rgba(139,170,255,0.10)' : 'var(--bg-deep)',
+                border: isActive ? '1px solid rgba(139,170,255,0.32)' : '1px solid var(--border-subtle)',
                 borderRadius: 'var(--radius-sm)',
                 fontFamily: 'var(--font-mono)',
                 fontSize: 10,
@@ -92,24 +160,58 @@ function SharedWorkspaceNodeComponent({ data }: NodeProps) {
               onMouseEnter={(e) => {
                 if (!isActive) {
                   e.currentTarget.style.background = 'var(--bg-elevated)';
-                  e.currentTarget.style.borderColor = 'var(--border-active)';
+                  e.currentTarget.style.borderColor = 'rgba(90,245,197,0.24)';
                 }
               }}
               onMouseLeave={(e) => {
                 if (!isActive) {
                   e.currentTarget.style.background = 'var(--bg-deep)';
-                  e.currentTarget.style.borderColor = 'transparent';
+                  e.currentTarget.style.borderColor = 'var(--border-subtle)';
                 }
               }}
             >
-              <span style={{ color: 'var(--text-dim)' }}>{'\u2192'}</span>
-              <span style={{ color: isActive ? 'var(--accent-info)' : 'var(--text-primary)', flex: 1 }}>{sl.name}</span>
-              <span style={{ color: 'var(--text-dim)', fontSize: 9 }}>{sl.targetAgent}</span>
+              <span
+                style={{
+                  width: 16,
+                  height: 16,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: isActive ? 'var(--accent-info)' : 'var(--text-dim)',
+                  flexShrink: 0,
+                  fontSize: 10,
+                }}
+              >
+                {'\u2192'}
+              </span>
+              <span
+                style={{
+                  color: isActive ? 'var(--accent-info)' : 'var(--text-primary)',
+                  flex: 1,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {sl.name}
+              </span>
+              <span
+                style={{
+                  color: 'var(--text-dim)',
+                  fontSize: 9,
+                  padding: '2px 6px',
+                  background: 'var(--bg-surface)',
+                  borderRadius: '999px',
+                  flexShrink: 0,
+                }}
+              >
+                {sl.targetAgent}
+              </span>
               {stepStatus && (
                 <div
                   style={{
-                    width: 5,
-                    height: 5,
+                    width: 6,
+                    height: 6,
                     borderRadius: '50%',
                     background:
                       stepStatus === 'completed'
@@ -117,6 +219,17 @@ function SharedWorkspaceNodeComponent({ data }: NodeProps) {
                         : stepStatus === 'pending'
                           ? 'var(--text-dim)'
                           : 'var(--accent-running)',
+                    boxShadow:
+                      stepStatus === 'completed' || stepStatus === 'running'
+                        ? '0 0 6px currentColor'
+                        : 'none',
+                    color:
+                      stepStatus === 'completed'
+                        ? 'var(--accent-chief)'
+                        : stepStatus === 'running'
+                          ? 'var(--accent-running)'
+                          : 'var(--text-dim)',
+                    flexShrink: 0,
                   }}
                 />
               )}
