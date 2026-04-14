@@ -9,6 +9,20 @@ The prototype has two purposes:
 
 This README is maintainer-facing. It describes the current prototype behavior and the filesystem model it relies on.
 
+## Screenshots
+
+Configure view (dark theme) — click an agent, the side panel opens the five config files for in-place editing. Cmd+S writes to disk.
+
+![Configure view](./assets/studio-configure-dark.png)
+
+Orchestrate + debug view (light theme) — three edge types (command in red, dataflow in green, sequence in blue) with per-session status on each node.
+
+![Orchestrate view](./assets/studio-orchestrate-light.png)
+
+End-to-end loop — edit in the side panel, Cmd+S, FileWatcher re-emits, canvas refreshes.
+
+![Demo loop](./assets/studio-demo.gif)
+
 ## What Studio Reads
 
 Studio scans `~/.openclaw/` and builds a graph from three sources:
