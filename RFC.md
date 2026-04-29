@@ -19,6 +19,8 @@
 
 I'd like to propose a new **Studio** tab in Control UI: **one canvas to configure, orchestrate, and debug a multi-agent team**. The relationship graph is on the left (delegate edges, dataflow symlinks, TASK.json sequence, live session status). The agent's five config files (`IDENTITY.md` / `SOUL.md` / `AGENTS.md` / `TOOLS.md` / `HEARTBEAT.md`) are editable in a side panel on the right. It sits alongside the existing `agents` / `sessions` / `channels` / `skills` / `logs` tabs.
 
+Studio is built on a specific multi-agent model: **independent agents are first-class, durable identities; `main` is a chief / orchestrator that does not own them; subagents are temporary parallel execution units, not long-term role carriers.** The graph expresses three real relationships in this model — command edges (who can delegate to whom), dataflow edges (whose outputs feed whose workspace), sequence edges (TASK.json execution order) — and the side panel makes the durable identities directly editable.
+
 Three verbs are load-bearing — Studio is not just a viewer:
 
 - **Configure** — click an agent → edit its 5 config files in place, Cmd+S writes to disk, FileWatcher picks it up
@@ -56,7 +58,31 @@ That's **5–10 files across 5 directories** for a single delegate decision. The
 
 Studio treats **configuring, orchestrating, and debugging a multi-agent team as one unified workflow** rather than three separate file-system spelunking exercises. The graph is the entry point; the editable config docs on the side panel are the working surface; the status overlay closes the loop.
 
+The cliff is not just file-tabbing friction. It is a sign that the default Control UI surface assumes a *personal-assistant + subagents* model — `main` is the user's primary agent, everything else is a short-lived subordinate spawned beneath it. That model is fine for one-person workflows. It actively gets in the way of multi-agent business use cases, where each agent is a durable, independent identity and the relationships between them are workflow-level collaboration, not lifecycle-level ownership. Studio is a surface shaped for the second model. The next section makes that model explicit.
+
 This fits the **UX** axis of the current roadmap in `CONTRIBUTING.md` ("Improving the onboarding wizard and error messages") — Studio is the onboarding cliff for users graduating from a single agent to a team, and a daily debugging tool for users who already have one.
+
+---
+
+## Agent model — independent agents as first-class
+
+Studio is built on a specific multi-agent model. Stating it explicitly matters because it determines what the UI must express and which existing surfaces it does or does not replace.
+
+- **Independent agents are first-class.** Every domain agent (researcher, drafter, reviewer, ...) is a durable identity with its own workspace, context files, tool policy, and execution assumptions. None of them are owned by `main` in identity, config, or lifecycle.
+- **`main` is the chief / orchestrator,** not the owner. It coordinates other agents but does not contain them. `sessions_spawn` is a *communication and delegation* mechanism between independent agents, not a parent-child ownership tree.
+- **Hierarchy in this model is collaboration, not ownership.** In a flow like `A → B & C → D`, A produces inputs B and C consume; B and C are peers at the same stage; D depends on the union of their outputs. The relationship is task-level and workflow-level, and it changes with the workflow. The same agent can be upstream in one workflow and downstream in another.
+- **Subagents are temporary parallel execution units,** not the primary abstraction for long-term roles or domain responsibilities. They are correct for short-lived, parallelizable, background work. Treating them as the carrier of durable capability is what makes a flat or session-tree UI break under multi-agent business workloads.
+
+Compressed:
+**Use independent agents to model durable responsibilities; use a collaboration hierarchy to model workflow dependencies; use subagents to model temporary parallel execution.**
+
+The three edges Studio renders are not arbitrary visual choices — they are the three real relationships in this model:
+
+- **command** — who is allowed to delegate to whom (`allowAgents`)
+- **dataflow** — whose outputs feed whose workspace (the symlink layer under `shared-workspace/projects/`)
+- **sequence** — what order steps execute in (`TASK.json`)
+
+A flat sessions table cannot express any of these. A session-tree view can only express command-spawned subagents and has no concept of dataflow between independent peer agents. Studio's surface is shaped by the model, not by aesthetic preference.
 
 ---
 
@@ -66,6 +92,7 @@ To avoid confusion with existing OpenClaw concepts, this RFC uses the name **Stu
 
 - **TaskFlow** (`docs/automation/taskflow.md`) is a **backend** orchestration engine for durable, revision-tracked multi-step task execution, driven by CLI (`openclaw tasks flow list/show/cancel`). It has no UI. Studio is a **read-only visualization layer**. The two are complementary — Studio can render a running TaskFlow's step graph as one of its views, but it does not replace, duplicate, or own any TaskFlow state.
 - **Canvas** (`docs/platforms/mac/canvas.md`) is a macOS-specific `WKWebView` rendering surface for agent-generated HTML/CSS/JS and A2UI. It is a target for agents to display things into. Studio lives inside Control UI, is cross-platform, and visualizes the agent system itself. No overlap.
+- **#52803 (Mission Board / Orchestration Panel)** is a runtime ops surface — session hierarchy from `spawnedBy` / `childSessions`, virtualized rendering for many concurrent sessions, and bulk `kill` / `steer` / `retry` / `cleanup` controls. It is a pure `sessions.list` consumer. Studio is adjacent: it operates on the filesystem layer (configs, symlinks, TASK.json) and treats independent agents — not subagents — as the primary unit. The two surfaces could share UI primitives long-term (status badges, agent pickers) but the cores do not reduce to each other. This RFC does not propose folding either issue into the other.
 
 **Studio's scope is:** *one canvas to configure (edit the 5 markdown files per agent), orchestrate (see and reason about delegate/dataflow/sequence edges), and debug (live session status, edge-click for the underlying record) a multi-agent team.* Graph is read-only in v1; config file editing is the one write surface.
 
@@ -186,12 +213,13 @@ I will not open PR #2 until PR #1 merges, and so on. No overlapping review load 
 
 I would genuinely value input on any of these before writing code:
 
-1. **Is this direction welcome at all?** If Control UI is meant to stay narrowly "gateway control plane" and topology visualization belongs elsewhere (docs site? separate tool? community repo under `openclaw/*`?), I'd like to know before investing further.
-2. **Graph rendering choice** — A / B / C in §"Proposed approach · 2"? Or something else you'd prefer?
-3. **Tab placement and naming** — `Studio` is my proposal. Is there a better name that fits existing Control UI tab conventions? Should it live behind a feature flag in v1?
-4. **API shape** — should the endpoint live under an existing namespace (e.g. `/api/agents/topology`) or a new one (`/api/topology`)?
-5. **Scope of v1 edges** — all three (command / dataflow / sequence), or should I ship only command edges first and add the other two in follow-ups?
-6. **Is there a Control UI maintainer** (I see @BunsDev, @velvet-shark listed for UI/UX and Control UI in `CONTRIBUTING.md`) who would prefer to review this proposal before it progresses to code?
+1. **Is multi-agent business use in scope for OpenClaw?** Studio is shaped for that scope: independent agents as durable identities, collaboration hierarchy as the relationship model. If Control UI is meant to stay personal-assistant-first and multi-agent orchestration is out of scope for `openclaw/openclaw`, this RFC belongs in a separate community surface (a docs-site companion, a separate tool, a `openclaw/*` community repo) rather than the main repo. Either answer is coherent — I'd rather know which one this is before investing further.
+2. **If multi-agent is in scope, is the architectural shape still open?** Studio proposes the model in §"Agent model" above. If maintainers already have a different model in mind (for example, treating subagents as the primary unit of long-term capability rather than independent agents), that determines whether this proposal aligns or competes — and it is a more important question to settle than any of the UI-layer questions below.
+3. **Graph rendering choice** — A / B / C in §"Proposed approach · 2"? Or something else you'd prefer?
+4. **Tab placement and naming** — `Studio` is my proposal. Is there a better name that fits existing Control UI tab conventions? Should it live behind a feature flag in v1?
+5. **API shape** — should the endpoint live under an existing namespace (e.g. `/api/agents/topology`) or a new one (`/api/topology`)?
+6. **Scope of v1 edges** — all three (command / dataflow / sequence), or should I ship only command edges first and add the other two in follow-ups?
+7. **Is there a Control UI maintainer** (I see @BunsDev, @velvet-shark listed for UI/UX and Control UI in `CONTRIBUTING.md`) who would prefer to review this proposal before it progresses to code?
 
 ---
 

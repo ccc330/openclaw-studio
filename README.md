@@ -23,13 +23,24 @@ End-to-end loop — edit in the side panel, Cmd+S, FileWatcher re-emits, canvas 
 
 ![Demo loop](./assets/studio-demo.gif)
 
+## Agent Model
+
+Studio is built on a specific multi-agent model, and the rest of this README presupposes it:
+
+- **Independent agents are first-class.** Each domain agent (researcher, drafter, reviewer, ...) is a durable identity with its own workspace, context files, tool policy, and execution assumptions. Agents are not owned by `main` in identity, config, or lifecycle.
+- **`main` is the chief / orchestrator,** not the owner. `sessions_spawn` is a *delegation* mechanism between independent agents, not a parent-child ownership tree.
+- **Hierarchy is collaboration, not ownership.** A flow like `A → B & C → D` describes which agent's outputs feed which agent's workspace at this stage of this workflow — it changes with the workflow, and the same agent can be upstream in one flow and downstream in another.
+- **Subagents are temporary parallel execution units,** not the primary abstraction for long-term roles.
+
+The full motivation, comparison to Control UI's existing personal-assistant model, and the three-edges-from-three-relationships derivation live in [`RFC.md`](./RFC.md).
+
 ## What Studio Reads
 
 Studio scans `~/.openclaw/` and builds a graph from three sources:
 
 1. `openclaw.json`
    - agent registry
-   - chief → subagent delegation via `subagents.allowAgents`
+   - delegation between agents (the `subagents.allowAgents` field declares which agent can `sessions_spawn` which other agent)
 2. agent workspaces `~/.openclaw/workspace-{id}/`
    - `IDENTITY.md`, `SOUL.md`, `AGENTS.md`, `TOOLS.md`, `HEARTBEAT.md`
    - per-agent output directories under `outputs/{project-id}/`
@@ -40,7 +51,7 @@ Studio scans `~/.openclaw/` and builds a graph from three sources:
 
 ## Symlink Dataflow Model
 
-The key collaboration primitive in this prototype is the filesystem, not an API queue.
+The key dataflow primitive between independent agents is the filesystem, not an API queue.
 
 Each specialist agent writes its own artifacts into its isolated workspace:
 
