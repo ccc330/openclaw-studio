@@ -1,4 +1,5 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import type {
   OpenClawConfig,
@@ -14,7 +15,7 @@ import type {
   GatewayInfo,
 } from './types.js';
 
-const OPENCLAW_DIR = path.join(process.env.HOME || '~', '.openclaw');
+const OPENCLAW_DIR = path.join(os.homedir(), '.openclaw');
 
 function ensureWithinOpenClaw(targetPath: string): boolean {
   const resolved = path.resolve(targetPath);
@@ -262,8 +263,13 @@ export function scanOpenClaw(): GraphModel {
     return { agents: [], teams: [], edges: [] };
   }
 
-  const defaultModel = config.agents?.defaults?.model?.primary || 'unknown';
-  const defaultWorkspace = config.agents.defaults.workspace;
+  if (!Array.isArray(config.agents?.list)) {
+    console.warn('[scanner] openclaw.json missing agents.list; returning empty graph');
+    return { agents: [], teams: [], edges: [] };
+  }
+
+  const defaultModel = config.agents.defaults?.model?.primary || 'unknown';
+  const defaultWorkspace = config.agents.defaults?.workspace ?? path.join(OPENCLAW_DIR, 'workspace');
 
   const agents: AgentNode[] = config.agents.list.map((agentCfg) => {
     const workspace = agentCfg.workspace || defaultWorkspace;
@@ -402,6 +408,8 @@ export function getWatchPaths(): string[] {
 
   const paths = [path.join(OPENCLAW_DIR, 'openclaw.json')];
 
+  if (!Array.isArray(config.agents?.list)) return paths;
+
   for (const agent of config.agents.list) {
     const ws = agent.workspace;
     if (ws && fs.existsSync(ws)) {
@@ -412,7 +420,8 @@ export function getWatchPaths(): string[] {
   }
 
   // Watch shared-workspace projects for all teams
-  const workspaceDir = config.agents.defaults.workspace;
+  const workspaceDir = config.agents.defaults?.workspace;
+  if (!workspaceDir) return paths;
   try {
     const entries = fs.readdirSync(workspaceDir, { withFileTypes: true });
     for (const entry of entries) {

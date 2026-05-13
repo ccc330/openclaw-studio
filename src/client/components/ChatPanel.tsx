@@ -32,7 +32,7 @@ export default function ChatPanel({ agents }: ChatPanelProps) {
   const sessionKey = useMemo(() => {
     if (!selectedAgentId) return mainSessionKey;
     const agent = agents.find((a) => a.id === selectedAgentId);
-    return agent?.isChief ? mainSessionKey : `agent:${selectedAgentId}`;
+    return agent?.isChief ? mainSessionKey : `agent:${selectedAgentId}:main`;
   }, [selectedAgentId, agents, mainSessionKey]);
 
   const messages: ChatMessage[] = messagesBySession[sessionKey] || [];

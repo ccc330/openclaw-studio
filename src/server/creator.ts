@@ -1,8 +1,9 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import type { OpenClawConfig, AgentConfig } from './types.js';
 
-const OPENCLAW_DIR = path.join(process.env.HOME || '~', '.openclaw');
+const OPENCLAW_DIR = path.join(os.homedir(), '.openclaw');
 
 const SAFE_ID_RE = /^[a-z][a-z0-9-]*$/;
 

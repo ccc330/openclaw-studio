@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "tsx watch src/server/index.ts",

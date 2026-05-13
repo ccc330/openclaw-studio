@@ -98,9 +98,10 @@ app.delete('/api/agent/:agentId', (req, res) => {
 
 // File read/write API (for project file preview)
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
-const OPENCLAW_DIR = path.join(process.env.HOME || '~', '.openclaw');
+const OPENCLAW_DIR = path.join(os.homedir(), '.openclaw');
 
 function isWithinOpenClaw(filePath: string): boolean {
   const resolved = path.resolve(filePath);
