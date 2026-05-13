@@ -13,6 +13,7 @@ export interface AgentConfig {
     alsoAllow?: string[];
     deny?: string[];
   };
+  skills?: string[];
 }
 
 export interface OpenClawConfig {
@@ -22,6 +23,7 @@ export interface OpenClawConfig {
       workspace: string;
       maxConcurrent: number;
       subagents: { maxConcurrent: number; archiveAfterMinutes: number };
+      skills?: string[];
     };
     list: AgentConfig[];
   };
@@ -31,6 +33,32 @@ export interface OpenClawConfig {
       allow: string[];
     };
   };
+  skills?: {
+    allowBundled?: string[];
+    entries?: Record<string, { enabled?: boolean }>;
+  };
+  gateway?: {
+    port?: number;
+    mode?: string;
+    bind?: string;
+    auth?: { mode?: string; token?: string };
+  };
+}
+
+export interface SkillInfo {
+  name: string;
+  description: string;
+  emoji: string;
+  homepage?: string;
+  source: 'managed' | 'bundled' | 'workspace';
+  path: string;
+  enabled: boolean;
+}
+
+export interface GatewayInfo {
+  host: string;
+  port: number;
+  token?: string;
 }
 
 export interface WorkspaceFiles {
@@ -81,6 +109,9 @@ export interface AgentNode {
   isChief: boolean;
   allowedAgents: string[];
   tools: string[];
+  toolsAlsoAllow: string[];
+  skills: string[];
+  skillsOverride: boolean;
   files: WorkspaceFiles;
 }
 

@@ -22,6 +22,7 @@ import PropertyPanel from './PropertyPanel';
 import ContextMenu from './ContextMenu';
 import CreateWizard from './CreateWizard';
 import SymlinkDialog from './SymlinkDialog';
+import ChatPanel from './ChatPanel';
 import { useGraph } from '../hooks/useGraph';
 import { useLocale } from '../i18n';
 import type { GraphModel, AgentNode as AgentNodeType } from '../hooks/useGraph';
@@ -436,6 +437,9 @@ export default function Canvas() {
         {/* Noise overlay */}
         <div className="noise-overlay" />
 
+        {/* Chat panel — docked bottom-center */}
+        <ChatPanel agents={graph.agents} />
+
         {/* Context menu */}
         {contextMenu && (
           <ContextMenu
@@ -455,7 +459,7 @@ export default function Canvas() {
 
       {/* Property panel */}
       {selectedAgent && (
-        <PropertyPanel agent={selectedAgent} onClose={() => setSelectedAgent(null)} />
+        <PropertyPanel agent={selectedAgent} onClose={() => setSelectedAgent(null)} allModels={graph.agents.map(a => a.model).filter(Boolean)} />
       )}
 
       {/* Symlink dialog */}

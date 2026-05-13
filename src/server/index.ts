@@ -1,7 +1,14 @@
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
-import { scanOpenClaw, updateAgentFile, updateAgentConfig } from './scanner.js';
+import {
+  scanOpenClaw,
+  updateAgentFile,
+  updateAgentConfig,
+  getAvailableTools,
+  getAvailableSkills,
+  getGatewayInfo,
+} from './scanner.js';
 import { createAgent, createTeam, createSymlink, deleteAgent } from './creator.js';
 import { FileWatcher } from './watcher.js';
 import type { WsMessage } from './types.js';
@@ -44,6 +51,28 @@ app.put('/api/agent/:agentId/config', (req, res) => {
     return;
   }
   res.json(result);
+});
+
+// Available tools list
+app.get('/api/tools', (_req, res) => {
+  const tools = getAvailableTools();
+  res.json({ tools });
+});
+
+// Skills available to a specific agent (resolved enabled/disabled)
+app.get('/api/agent/:agentId/skills', (req, res) => {
+  const skills = getAvailableSkills(req.params.agentId);
+  res.json({ skills });
+});
+
+// Gateway connection info (for client-side chat)
+app.get('/api/gateway', (_req, res) => {
+  const info = getGatewayInfo();
+  if (!info) {
+    res.status(404).json({ error: 'Gateway not configured' });
+    return;
+  }
+  res.json(info);
 });
 
 // P3: Creation APIs

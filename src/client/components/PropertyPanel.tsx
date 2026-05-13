@@ -3,22 +3,33 @@ import MarkdownEditor from './MarkdownEditor';
 import type { AgentNode } from '../hooks/useGraph';
 import { useLocale } from '../i18n';
 
-type TabKey = 'identity' | 'soul' | 'agents' | 'tools' | 'heartbeat';
+type TabKey = 'identity' | 'soul' | 'agents' | 'tools' | 'skills' | 'heartbeat';
 
 const TAB_KEYS: { key: TabKey; fileType: string; i18n: string }[] = [
   { key: 'identity', fileType: 'identity', i18n: 'panel.tab.identity' },
   { key: 'soul', fileType: 'soul', i18n: 'panel.tab.soul' },
   { key: 'agents', fileType: 'agents', i18n: 'panel.tab.agents' },
   { key: 'tools', fileType: 'tools', i18n: 'panel.tab.tools' },
+  { key: 'skills', fileType: '', i18n: 'panel.tab.skills' },
   { key: 'heartbeat', fileType: 'heartbeat', i18n: 'panel.tab.heartbeat' },
 ];
+
+interface SkillRecord {
+  name: string;
+  description: string;
+  emoji: string;
+  homepage?: string;
+  source: 'managed' | 'bundled' | 'workspace';
+  enabled: boolean;
+}
 
 interface PropertyPanelProps {
   agent: AgentNode;
   onClose: () => void;
+  allModels?: string[];
 }
 
-export default function PropertyPanel({ agent, onClose }: PropertyPanelProps) {
+export default function PropertyPanel({ agent, onClose, allModels = [] }: PropertyPanelProps) {
   const { t } = useLocale();
   const [activeTab, setActiveTab] = useState<TabKey>('identity');
   const [editedFiles, setEditedFiles] = useState<Record<string, string>>({});
@@ -28,6 +39,11 @@ export default function PropertyPanel({ agent, onClose }: PropertyPanelProps) {
   // Config fields
   const [agentName, setAgentName] = useState(agent.name);
   const [agentModel, setAgentModel] = useState(agent.model);
+  const [toolsAllow, setToolsAllow] = useState<string[]>(agent.tools);
+  const [availableTools, setAvailableTools] = useState<string[]>([]);
+  const [skills, setSkills] = useState<SkillRecord[]>([]);
+  const [skillsOverride, setSkillsOverride] = useState<boolean>(agent.skillsOverride);
+  const [skillsDirty, setSkillsDirty] = useState<boolean>(false);
 
   // Initialize edited files from agent data
   useEffect(() => {
@@ -39,7 +55,24 @@ export default function PropertyPanel({ agent, onClose }: PropertyPanelProps) {
     setEditedFiles(files);
     setAgentName(agent.name);
     setAgentModel(agent.model);
+    setToolsAllow(agent.tools);
+    setSkillsOverride(agent.skillsOverride);
+    setSkillsDirty(false);
   }, [agent]);
+
+  useEffect(() => {
+    fetch('/api/tools')
+      .then((res) => res.json())
+      .then((data) => setAvailableTools(data.tools || []))
+      .catch(() => setAvailableTools([]));
+  }, []);
+
+  useEffect(() => {
+    fetch(`/api/agent/${agent.id}/skills`)
+      .then((res) => res.json())
+      .then((data) => setSkills(data.skills || []))
+      .catch(() => setSkills([]));
+  }, [agent.id]);
 
   const handleFileChange = useCallback((fileType: string, content: string) => {
     setEditedFiles((prev) => ({ ...prev, [fileType]: content }));
@@ -72,6 +105,30 @@ export default function PropertyPanel({ agent, onClose }: PropertyPanelProps) {
         if (!res.ok) throw new Error('Config save failed');
       }
 
+      // Save tools config if tools tab
+      if (activeTab === 'tools') {
+        const res = await fetch(`/api/agent/${agent.id}/config`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tools: { allow: toolsAllow } }),
+        });
+        if (!res.ok) throw new Error('Tools save failed');
+      }
+
+      // Save skills config if skills tab (only if there's an override)
+      if (activeTab === 'skills' && skillsDirty) {
+        const body: { skills: string[] | null } = skillsOverride
+          ? { skills: skills.filter((s) => s.enabled).map((s) => s.name) }
+          : { skills: null };
+        const res = await fetch(`/api/agent/${agent.id}/config`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error('Skills save failed');
+        setSkillsDirty(false);
+      }
+
       setSaveStatus('success');
       setTimeout(() => setSaveStatus('idle'), 2000);
     } catch {
@@ -79,7 +136,7 @@ export default function PropertyPanel({ agent, onClose }: PropertyPanelProps) {
     } finally {
       setSaving(false);
     }
-  }, [activeTab, editedFiles, agent.id, agentName, agentModel]);
+  }, [activeTab, editedFiles, agent.id, agentName, agentModel, toolsAllow, skills, skillsOverride, skillsDirty]);
 
   const currentContent = editedFiles[TAB_KEYS.find((t) => t.key === activeTab)?.fileType || ''] || '';
 
@@ -211,13 +268,37 @@ export default function PropertyPanel({ agent, onClose }: PropertyPanelProps) {
             emoji={agent.emoji}
             workspace={agent.workspace}
             tools={agent.tools}
+            modelOptions={[...new Set(allModels)].sort()}
             onNameChange={setAgentName}
             onModelChange={setAgentModel}
             identityContent={currentContent}
             onContentChange={(v) => handleFileChange('identity', v)}
           />
         ) : activeTab === 'tools' ? (
-          <ToolsTab tools={agent.tools} content={currentContent} onChange={(v) => handleFileChange('tools', v)} />
+          <ToolsTab
+            toolsAllow={toolsAllow}
+            toolsAlsoAllow={agent.toolsAlsoAllow || []}
+            availableTools={availableTools}
+            onChange={setToolsAllow}
+            content={currentContent}
+            onContentChange={(v) => handleFileChange('tools', v)}
+          />
+        ) : activeTab === 'skills' ? (
+          <SkillsTab
+            skills={skills}
+            override={skillsOverride}
+            onToggleOverride={(v) => {
+              setSkillsOverride(v);
+              setSkillsDirty(true);
+            }}
+            onToggleSkill={(name) => {
+              setSkills((prev) =>
+                prev.map((s) => (s.name === name ? { ...s, enabled: !s.enabled } : s)),
+              );
+              setSkillsOverride(true);
+              setSkillsDirty(true);
+            }}
+          />
         ) : (
           <MarkdownEditor
             value={currentContent}
@@ -281,6 +362,7 @@ function IdentityTab({
   emoji,
   workspace,
   tools,
+  modelOptions,
   onNameChange,
   onModelChange,
   identityContent,
@@ -292,12 +374,15 @@ function IdentityTab({
   emoji: string;
   workspace: string;
   tools: string[];
+  modelOptions: string[];
   onNameChange: (v: string) => void;
   onModelChange: (v: string) => void;
   identityContent: string;
   onContentChange: (v: string) => void;
 }) {
   const { t } = useLocale();
+  const isKnownModel = modelOptions.includes(agentModel);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {/* Structured fields */}
@@ -305,7 +390,64 @@ function IdentityTab({
         <Field label="Agent ID" value={agentId} disabled />
         <Field label="Emoji" value={emoji} disabled />
         <Field label={t('panel.field.name')} value={agentName} onChange={onNameChange} />
-        <Field label={t('panel.field.model')} value={agentModel} onChange={onModelChange} />
+        {/* Model selector */}
+        <div>
+          <div
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 10,
+              color: 'var(--text-dim)',
+              marginBottom: 3,
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+            }}
+          >
+            {t('panel.field.model')}
+          </div>
+          <select
+            value={isKnownModel ? agentModel : '__custom__'}
+            onChange={(e) => {
+              if (e.target.value !== '__custom__') onModelChange(e.target.value);
+            }}
+            style={{
+              width: '100%',
+              padding: '6px 8px',
+              background: 'var(--bg-void)',
+              border: '1px solid var(--border-dim)',
+              borderRadius: 'var(--radius-sm)',
+              color: 'var(--text-primary)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 12,
+              outline: 'none',
+            }}
+          >
+            {modelOptions.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+            {!isKnownModel && (
+              <option value="__custom__">{agentModel || '(custom)'}</option>
+            )}
+          </select>
+          {!isKnownModel && (
+            <input
+              value={agentModel}
+              onChange={(e) => onModelChange(e.target.value)}
+              placeholder="custom model name"
+              style={{
+                width: '100%',
+                padding: '6px 8px',
+                marginTop: 4,
+                background: 'var(--bg-void)',
+                border: '1px solid var(--border-dim)',
+                borderRadius: 'var(--radius-sm)',
+                color: 'var(--text-primary)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 12,
+                outline: 'none',
+              }}
+            />
+          )}
+        </div>
       </div>
 
       <Field label="Workspace" value={workspace} disabled fullWidth />
@@ -351,69 +493,451 @@ function IdentityTab({
   );
 }
 
-/* Tools Tab — tool list with toggle display + TOOLS.md editor */
+/* Tools Tab — editable tool toggles + add/remove + TOOLS.md editor */
 function ToolsTab({
-  tools,
-  content,
+  toolsAllow,
+  toolsAlsoAllow,
+  availableTools,
   onChange,
+  content,
+  onContentChange,
 }: {
-  tools: string[];
+  toolsAllow: string[];
+  toolsAlsoAllow: string[];
+  availableTools: string[];
+  onChange: (next: string[]) => void;
   content: string;
-  onChange: (v: string) => void;
+  onContentChange: (v: string) => void;
 }) {
+  const { t } = useLocale();
+  const [newTool, setNewTool] = useState('');
+
+  const toggle = (tool: string) => {
+    if (toolsAllow.includes(tool)) {
+      onChange(toolsAllow.filter((x) => x !== tool));
+    } else {
+      onChange([...toolsAllow, tool]);
+    }
+  };
+
+  const remove = (tool: string) => onChange(toolsAllow.filter((x) => x !== tool));
+
+  const addTool = () => {
+    const trimmed = newTool.trim();
+    if (!trimmed || toolsAllow.includes(trimmed)) return;
+    onChange([...toolsAllow, trimmed]);
+    setNewTool('');
+  };
+
+  const suggestions = availableTools.filter(
+    (x) => !toolsAllow.includes(x) && !toolsAlsoAllow.includes(x),
+  );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* Allowed tools list with toggles */}
       <div>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-dim)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-          openclaw.json → tools.allow ({tools.length})
+          {t('panel.tools.allow')} ({toolsAllow.length})
         </div>
         <div
           style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: 4,
-            maxHeight: 160,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 2,
+            maxHeight: 180,
             overflowY: 'auto',
-            padding: 8,
+            padding: 6,
             background: 'var(--bg-void)',
             borderRadius: 'var(--radius-sm)',
             border: '1px solid var(--border-dim)',
           }}
         >
-          {tools.map((tool) => (
-            <div
-              key={tool}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '3px 6px',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 10,
-                color: 'var(--text-secondary)',
-              }}
-            >
-              <div
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: 2,
-                  background: 'var(--accent-chief)',
-                  opacity: 0.6,
-                  flexShrink: 0,
-                }}
-              />
-              {tool}
+          {toolsAllow.length === 0 && toolsAlsoAllow.length === 0 && (
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-dim)', padding: '8px 6px', textAlign: 'center' }}>
+              {t('panel.tools.empty')}
             </div>
+          )}
+          {toolsAllow.map((tool) => (
+            <ToolRow
+              key={tool}
+              name={tool}
+              enabled
+              onToggle={() => toggle(tool)}
+              onRemove={() => remove(tool)}
+            />
+          ))}
+          {toolsAlsoAllow.map((tool) => (
+            <ToolRow
+              key={`also-${tool}`}
+              name={tool}
+              enabled
+              inherited
+            />
           ))}
         </div>
       </div>
 
+      {/* Add tool input */}
+      <div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-dim)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          {t('panel.tools.add')}
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            list="tool-suggestions"
+            value={newTool}
+            onChange={(e) => setNewTool(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                addTool();
+              }
+            }}
+            placeholder={t('panel.tools.placeholder')}
+            style={{
+              flex: 1,
+              padding: '6px 8px',
+              background: 'var(--bg-void)',
+              border: '1px solid var(--border-dim)',
+              borderRadius: 'var(--radius-sm)',
+              color: 'var(--text-primary)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 11,
+              outline: 'none',
+            }}
+          />
+          <datalist id="tool-suggestions">
+            {suggestions.map((s) => (
+              <option key={s} value={s} />
+            ))}
+          </datalist>
+          <button
+            onClick={addTool}
+            disabled={!newTool.trim()}
+            style={{
+              padding: '6px 12px',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 11,
+              fontWeight: 600,
+              color: 'white',
+              background: newTool.trim() ? 'var(--accent-info)' : 'var(--bg-elevated)',
+              border: 'none',
+              borderRadius: 'var(--radius-sm)',
+              cursor: newTool.trim() ? 'pointer' : 'default',
+              opacity: newTool.trim() ? 1 : 0.5,
+            }}
+          >
+            +
+          </button>
+        </div>
+      </div>
+
+      {/* TOOLS.md editor */}
       <div>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-dim)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
           TOOLS.md
         </div>
-        <MarkdownEditor value={content} onChange={onChange} placeholder="No TOOLS.md found" />
+        <MarkdownEditor value={content} onChange={onContentChange} placeholder="No TOOLS.md found" />
+      </div>
+    </div>
+  );
+}
+
+function ToolRow({
+  name,
+  enabled,
+  inherited,
+  onToggle,
+  onRemove,
+}: {
+  name: string;
+  enabled: boolean;
+  inherited?: boolean;
+  onToggle?: () => void;
+  onRemove?: () => void;
+}) {
+  const { t } = useLocale();
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '4px 6px',
+        fontFamily: 'var(--font-mono)',
+        fontSize: 11,
+        color: 'var(--text-secondary)',
+        borderRadius: 'var(--radius-sm)',
+        transition: 'background 0.15s',
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-elevated)')}
+      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+    >
+      <button
+        onClick={onToggle}
+        disabled={!onToggle}
+        style={{
+          width: 26,
+          height: 14,
+          padding: 0,
+          borderRadius: 7,
+          background: enabled ? 'var(--accent-info)' : 'var(--bg-surface)',
+          border: '1px solid var(--border-dim)',
+          cursor: onToggle ? 'pointer' : 'default',
+          position: 'relative',
+          transition: 'background 0.15s',
+          opacity: inherited ? 0.5 : 1,
+          flexShrink: 0,
+        }}
+        aria-label={`toggle ${name}`}
+      >
+        <span
+          style={{
+            position: 'absolute',
+            top: 1,
+            left: enabled ? 13 : 1,
+            width: 10,
+            height: 10,
+            borderRadius: '50%',
+            background: 'white',
+            transition: 'left 0.15s',
+          }}
+        />
+      </button>
+      <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
+      {inherited && (
+        <span
+          style={{
+            fontSize: 9,
+            padding: '1px 5px',
+            background: 'var(--bg-surface)',
+            color: 'var(--text-dim)',
+            borderRadius: 'var(--radius-sm)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.04em',
+          }}
+        >
+          {t('panel.tools.inherited')}
+        </span>
+      )}
+      {onRemove && (
+        <button
+          onClick={onRemove}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--text-dim)',
+            cursor: 'pointer',
+            fontSize: 12,
+            padding: 0,
+            width: 18,
+            height: 18,
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--accent-command)')}
+          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-dim)')}
+          aria-label={`remove ${name}`}
+        >
+          ✕
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* Skills Tab — per-agent skill toggles + override management */
+function SkillsTab({
+  skills,
+  override,
+  onToggleOverride,
+  onToggleSkill,
+}: {
+  skills: SkillRecord[];
+  override: boolean;
+  onToggleOverride: (next: boolean) => void;
+  onToggleSkill: (name: string) => void;
+}) {
+  const { t } = useLocale();
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  if (skills.length === 0) {
+    return (
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)', padding: 12, textAlign: 'center' }}>
+        {t('panel.skills.noSkills')}
+      </div>
+    );
+  }
+
+  const enabledCount = skills.filter((s) => s.enabled).length;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* Override banner */}
+      <div
+        style={{
+          padding: '8px 10px',
+          background: override ? 'var(--bg-surface)' : 'var(--bg-void)',
+          border: `1px solid ${override ? 'var(--accent-info)' : 'var(--border-dim)'}`,
+          borderRadius: 'var(--radius-sm)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+        }}
+      >
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: override ? 'var(--accent-info)' : 'var(--text-dim)', lineHeight: 1.4 }}>
+          {override ? t('panel.skills.override') : t('panel.skills.defaults')}
+        </div>
+        {override && (
+          <button
+            onClick={() => onToggleOverride(false)}
+            style={{
+              padding: '3px 8px',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 10,
+              color: 'var(--text-secondary)',
+              background: 'var(--bg-void)',
+              border: '1px solid var(--border-dim)',
+              borderRadius: 'var(--radius-sm)',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {t('panel.skills.resetDefaults')}
+          </button>
+        )}
+      </div>
+
+      {/* Skills list */}
+      <div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-dim)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          {t('panel.skills.available')} ({enabledCount}/{skills.length})
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 2,
+            padding: 6,
+            background: 'var(--bg-void)',
+            borderRadius: 'var(--radius-sm)',
+            border: '1px solid var(--border-dim)',
+            maxHeight: 360,
+            overflowY: 'auto',
+          }}
+        >
+          {skills.map((skill) => {
+            const isOpen = expanded === skill.name;
+            return (
+              <div
+                key={skill.name}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  padding: '6px',
+                  borderRadius: 'var(--radius-sm)',
+                  transition: 'background 0.15s',
+                  background: isOpen ? 'var(--bg-elevated)' : 'transparent',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    onClick={() => onToggleSkill(skill.name)}
+                    style={{
+                      width: 26,
+                      height: 14,
+                      padding: 0,
+                      borderRadius: 7,
+                      background: skill.enabled ? 'var(--accent-info)' : 'var(--bg-surface)',
+                      border: '1px solid var(--border-dim)',
+                      cursor: 'pointer',
+                      position: 'relative',
+                      transition: 'background 0.15s',
+                      flexShrink: 0,
+                    }}
+                    aria-label={`toggle skill ${skill.name}`}
+                  >
+                    <span
+                      style={{
+                        position: 'absolute',
+                        top: 1,
+                        left: skill.enabled ? 13 : 1,
+                        width: 10,
+                        height: 10,
+                        borderRadius: '50%',
+                        background: 'white',
+                        transition: 'left 0.15s',
+                      }}
+                    />
+                  </button>
+                  <span style={{ fontSize: 14, flexShrink: 0 }}>{skill.emoji}</span>
+                  <button
+                    onClick={() => setExpanded(isOpen ? null : skill.name)}
+                    style={{
+                      flex: 1,
+                      textAlign: 'left',
+                      background: 'transparent',
+                      border: 'none',
+                      padding: 0,
+                      cursor: 'pointer',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 11,
+                      color: 'var(--text-primary)',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {skill.name}
+                  </button>
+                  <span
+                    style={{
+                      fontSize: 9,
+                      padding: '1px 5px',
+                      background: skill.source === 'bundled' ? 'var(--bg-surface)' : 'var(--bg-elevated)',
+                      color: 'var(--text-dim)',
+                      borderRadius: 'var(--radius-sm)',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                    }}
+                  >
+                    {t(`panel.skills.${skill.source}`)}
+                  </span>
+                </div>
+                {isOpen && (
+                  <div
+                    style={{
+                      marginTop: 6,
+                      marginLeft: 34,
+                      padding: '6px 8px',
+                      background: 'var(--bg-void)',
+                      borderRadius: 'var(--radius-sm)',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 10,
+                      color: 'var(--text-secondary)',
+                      lineHeight: 1.5,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 4,
+                    }}
+                  >
+                    <div>{skill.description || '(no description)'}</div>
+                    {skill.homepage && (
+                      <a
+                        href={skill.homepage}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: 'var(--accent-info)', textDecoration: 'none' }}
+                      >
+                        {t('panel.skills.homepage')} →
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

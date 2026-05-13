@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type {
   OpenClawConfig,
+  AgentConfig,
   AgentNode,
   TeamInfo,
   ProjectInfo,
@@ -9,6 +10,8 @@ import type {
   EdgeInfo,
   GraphModel,
   WorkspaceFiles,
+  SkillInfo,
+  GatewayInfo,
 } from './types.js';
 
 const OPENCLAW_DIR = path.join(process.env.HOME || '~', '.openclaw');
@@ -280,9 +283,12 @@ export function scanOpenClaw(): GraphModel {
       role = nameParts?.[1] || agentCfg.id;
     }
 
-    const tools: string[] = [];
-    if (agentCfg.tools?.allow) tools.push(...agentCfg.tools.allow);
-    if (agentCfg.tools?.alsoAllow) tools.push(...agentCfg.tools.alsoAllow);
+    const tools: string[] = agentCfg.tools?.allow ? [...agentCfg.tools.allow] : [];
+    const toolsAlsoAllow: string[] = agentCfg.tools?.alsoAllow ? [...agentCfg.tools.alsoAllow] : [];
+
+    const defaultSkills = config.agents.defaults?.skills || [];
+    const skillsOverride = agentCfg.skills !== undefined;
+    const skills = skillsOverride ? agentCfg.skills! : defaultSkills;
 
     return {
       id: agentCfg.id,
@@ -295,6 +301,9 @@ export function scanOpenClaw(): GraphModel {
       isChief: agentCfg.default === true || agentCfg.id === 'main',
       allowedAgents: agentCfg.subagents?.allowAgents || [],
       tools,
+      toolsAlsoAllow,
+      skills,
+      skillsOverride,
       files,
     };
   });
@@ -345,7 +354,13 @@ export function updateAgentFile(
 
 export function updateAgentConfig(
   agentId: string,
-  updates: { name?: string; model?: string; allowAgents?: string[] },
+  updates: {
+    name?: string;
+    model?: string;
+    allowAgents?: string[];
+    tools?: { allow?: string[] };
+    skills?: string[] | null;
+  },
 ): { ok: boolean; error?: string } {
   const configPath = path.join(OPENCLAW_DIR, 'openclaw.json');
   const config = readJsonSafe<OpenClawConfig>(configPath);
@@ -360,6 +375,17 @@ export function updateAgentConfig(
   if (updates.allowAgents !== undefined) {
     if (!agent.subagents) agent.subagents = {};
     agent.subagents.allowAgents = updates.allowAgents;
+  }
+  if (updates.tools !== undefined) {
+    if (!agent.tools) agent.tools = {};
+    if (updates.tools.allow !== undefined) agent.tools.allow = updates.tools.allow;
+  }
+  if (updates.skills !== undefined) {
+    if (updates.skills === null) {
+      delete agent.skills;
+    } else {
+      agent.skills = updates.skills;
+    }
   }
 
   try {
@@ -399,4 +425,155 @@ export function getWatchPaths(): string[] {
   }
 
   return paths;
+}
+
+function parseSkillFrontmatter(content: string): {
+  name?: string;
+  description?: string;
+  emoji?: string;
+  homepage?: string;
+} {
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return {};
+  const fm = fmMatch[1];
+
+  // name: value (single-line)
+  const name = fm.match(/^name:\s*(.+)$/m)?.[1]?.trim();
+
+  // description: can be literal block (|) or single/multi-line
+  let description: string | undefined;
+  const descBlockMatch = fm.match(/^description:\s*\|\s*\n([\s\S]+?)(?=\n\S|$)/m);
+  if (descBlockMatch) {
+    description = descBlockMatch[1]
+      .split('\n')
+      .map((l) => l.replace(/^  /, ''))
+      .join(' ')
+      .trim();
+  } else {
+    const descLineMatch = fm.match(/^description:\s*(.+?)(?=\n\S|$)/ms);
+    if (descLineMatch) description = descLineMatch[1].trim().replace(/\s+/g, ' ');
+  }
+
+  // emoji from metadata.openclaw.emoji or top-level emoji
+  const emojiMatch = fm.match(/emoji:\s*(.+)/);
+  const emoji = emojiMatch?.[1]?.trim().replace(/^["']|["']$/g, '');
+
+  // homepage from metadata.openclaw.homepage or top-level homepage
+  const homepageMatch = fm.match(/homepage:\s*(.+)/);
+  const homepage = homepageMatch?.[1]?.trim().replace(/^["']|["']$/g, '');
+
+  return { name, description, emoji, homepage };
+}
+
+function scanSkillDirs(
+  dir: string,
+  source: 'managed' | 'bundled' | 'workspace',
+): Array<Omit<SkillInfo, 'enabled'>> {
+  if (!fs.existsSync(dir)) return [];
+  const out: Array<Omit<SkillInfo, 'enabled'>> = [];
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const skillDir = path.join(dir, entry.name);
+      const skillFile = path.join(skillDir, 'SKILL.md');
+      if (!fs.existsSync(skillFile)) continue;
+      const content = readFileSafe(skillFile) || '';
+      const fm = parseSkillFrontmatter(content);
+      out.push({
+        name: fm.name || entry.name,
+        description: fm.description || '',
+        emoji: fm.emoji || '🧩',
+        homepage: fm.homepage,
+        source,
+        path: skillDir,
+      });
+    }
+  } catch {
+    // directory unreadable
+  }
+  return out;
+}
+
+function findBundledSkillsDir(): string | null {
+  const candidates = [
+    path.join(process.env.HOME || '~', '.npm-global/lib/node_modules/openclaw/skills'),
+    '/usr/local/lib/node_modules/openclaw/skills',
+    '/opt/homebrew/lib/node_modules/openclaw/skills',
+  ];
+  for (const c of candidates) if (fs.existsSync(c)) return c;
+  return null;
+}
+
+export function getAvailableSkills(agentId: string): SkillInfo[] {
+  const config = readJsonSafe<OpenClawConfig>(path.join(OPENCLAW_DIR, 'openclaw.json'));
+  if (!config) return [];
+
+  const managed = scanSkillDirs(path.join(OPENCLAW_DIR, 'skills'), 'managed');
+  const bundled = findBundledSkillsDir()
+    ? scanSkillDirs(findBundledSkillsDir()!, 'bundled')
+    : [];
+
+  // Dedup by name (managed wins over bundled)
+  const seen = new Set<string>();
+  const all: Array<Omit<SkillInfo, 'enabled'>> = [];
+  for (const s of [...managed, ...bundled]) {
+    if (seen.has(s.name)) continue;
+    seen.add(s.name);
+    all.push(s);
+  }
+
+  const agentCfg = config.agents.list.find((a) => a.id === agentId);
+  const enabledSet = new Set<string>(
+    agentCfg?.skills !== undefined
+      ? agentCfg.skills
+      : config.agents.defaults?.skills || [],
+  );
+
+  // Apply entries-level disabled flag (globally disables the skill)
+  const entries = config.skills?.entries || {};
+
+  return all.map((s) => ({
+    ...s,
+    enabled: enabledSet.has(s.name) && entries[s.name]?.enabled !== false,
+  }));
+}
+
+export function getGatewayInfo(): GatewayInfo | null {
+  const config = readJsonSafe<OpenClawConfig>(path.join(OPENCLAW_DIR, 'openclaw.json'));
+  if (!config?.gateway?.port) return null;
+  const bind = config.gateway.bind;
+  const host = bind === 'loopback' || bind === 'localhost' || !bind ? '127.0.0.1' : bind;
+  return {
+    host,
+    port: config.gateway.port,
+    token: config.gateway.auth?.token,
+  };
+}
+
+export function getAvailableTools(): string[] {
+  const config = readJsonSafe<OpenClawConfig>(path.join(OPENCLAW_DIR, 'openclaw.json'));
+  if (!config) return [];
+
+  const toolSet = new Set<string>();
+
+  // Collect from all agents
+  for (const agent of config.agents.list) {
+    if (agent.tools?.allow) agent.tools.allow.forEach((t) => toolSet.add(t));
+    if (agent.tools?.alsoAllow) agent.tools.alsoAllow.forEach((t) => toolSet.add(t));
+  }
+
+  // Add well-known OpenClaw tools as a baseline
+  const wellKnown = [
+    'read', 'write', 'edit', 'apply_patch', 'exec',
+    'web_search', 'web_fetch', 'image', 'image_generate',
+    'sessions_list', 'sessions_history', 'sessions_send', 'sessions_spawn',
+    'sessions_yield', 'subagents', 'session_status',
+    'memory_search', 'memory_get', 'browser', 'canvas',
+    'message', 'cron', 'gateway', 'agents_list',
+    'video_generate', 'tts', 'code_execution', 'process',
+  ];
+  wellKnown.forEach((t) => toolSet.add(t));
+
+  return [...toolSet].sort();
 }

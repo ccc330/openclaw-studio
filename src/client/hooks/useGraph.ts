@@ -11,6 +11,9 @@ export interface AgentNode {
   isChief: boolean;
   allowedAgents: string[];
   tools: string[];
+  toolsAlsoAllow: string[];
+  skills: string[];
+  skillsOverride: boolean;
   files: Record<string, string | undefined>;
 }
 
@@ -68,7 +71,8 @@ export function useGraph() {
 
   const connect = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    const wsHost = import.meta.env.DEV ? 'localhost:3777' : window.location.host;
+    const wsUrl = `${protocol}//${wsHost}/ws`;
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => setConnected(true);
