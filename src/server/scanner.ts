@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { createRequire } from 'module';
 import os from 'os';
 import path from 'path';
 import type {
@@ -14,6 +15,8 @@ import type {
   SkillInfo,
   GatewayInfo,
 } from './types.js';
+
+const require = createRequire(import.meta.url);
 
 const OPENCLAW_DIR = path.join(os.homedir(), '.openclaw');
 
@@ -505,11 +508,30 @@ function scanSkillDirs(
 }
 
 function findBundledSkillsDir(): string | null {
+  // 1. Node module resolution — works when openclaw is linked into the project
+  try {
+    const pkgJson = require.resolve('openclaw/package.json');
+    const dir = path.join(path.dirname(pkgJson), 'skills');
+    if (fs.existsSync(dir)) return dir;
+  } catch {
+    // not resolvable; fall through
+  }
+
+  // 2. Node binary's own prefix — covers nvm / fnm / volta on Unix where
+  // process.execPath looks like ~/.nvm/versions/node/v22.0.0/bin/node
+  const nodePrefix = path.dirname(path.dirname(process.execPath));
+  const sibling = path.join(nodePrefix, 'lib', 'node_modules', 'openclaw', 'skills');
+  if (fs.existsSync(sibling)) return sibling;
+
+  // 3. Well-known global install locations
   const candidates = [
-    path.join(process.env.HOME || '~', '.npm-global/lib/node_modules/openclaw/skills'),
+    path.join(os.homedir(), '.npm-global', 'lib', 'node_modules', 'openclaw', 'skills'),
     '/usr/local/lib/node_modules/openclaw/skills',
     '/opt/homebrew/lib/node_modules/openclaw/skills',
   ];
+  if (process.platform === 'win32' && process.env.APPDATA) {
+    candidates.push(path.join(process.env.APPDATA, 'npm', 'node_modules', 'openclaw', 'skills'));
+  }
   for (const c of candidates) if (fs.existsSync(c)) return c;
   return null;
 }
