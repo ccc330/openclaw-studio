@@ -574,12 +574,19 @@ export function getGatewayInfo(): GatewayInfo | null {
   const config = readJsonSafe<OpenClawConfig>(path.join(OPENCLAW_DIR, 'openclaw.json'));
   if (!config?.gateway?.port) return null;
   const bind = config.gateway.bind;
-  const host = bind === 'loopback' || bind === 'localhost' || !bind ? '127.0.0.1' : bind;
-  return {
-    host,
-    port: config.gateway.port,
-    token: config.gateway.auth?.token,
-  };
+  // Loopback aliases AND wildcard binds (0.0.0.0 / :: / *) all need to be
+  // rewritten to 127.0.0.1 — browsers refuse to connect to wildcard addresses.
+  const isLoopbackOrWildcard =
+    !bind ||
+    bind === 'loopback' ||
+    bind === 'localhost' ||
+    bind === '0.0.0.0' ||
+    bind === '::' ||
+    bind === '*';
+  const host = isLoopbackOrWildcard ? '127.0.0.1' : bind;
+  const rawToken = config.gateway.auth?.token;
+  const token = typeof rawToken === 'string' && rawToken.trim() ? rawToken : undefined;
+  return { host, port: config.gateway.port, token };
 }
 
 export function getAvailableTools(): string[] {

@@ -184,6 +184,15 @@ const watcher = new FileWatcher((filePath) => {
 
 watcher.start();
 
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n  ❌ Port ${PORT} is already in use.`);
+    console.error(`     Stop whatever is using it, or change PORT in src/server/index.ts.\n`);
+    process.exit(1);
+  }
+  throw err;
+});
+
 server.listen(PORT, () => {
   console.log(`\n  🦞 OpenClaw Studio server running at http://localhost:${PORT}`);
   console.log(`  📡 WebSocket at ws://localhost:${PORT}/ws`);
