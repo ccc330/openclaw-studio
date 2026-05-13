@@ -137,32 +137,75 @@ Proposed upstream subset:
 - `src/client/components/PropertyPanel.tsx`
   - edits per-agent workspace files
 
-## Local Development
+## Quick Start
 
-Requirements:
+### Prerequisites
 
-- Node 20+
-- an existing `~/.openclaw/` directory with at least one agent
+1. **Node.js ≥ 20** (Active LTS). The repo ships an `.nvmrc` — `nvm use` picks the right version automatically.
+2. **OpenClaw CLI** installed globally and initialized:
+   ```bash
+   npm install -g openclaw
+   openclaw init
+   ```
+   `openclaw init` creates `~/.openclaw/` with the agent registry, default workspaces, and config files. Without this directory Studio shows an empty-state card pointing back at this step.
+3. **(Optional) OpenClaw Gateway** if you want the in-app ChatPanel. Add a `gateway` block to `~/.openclaw/openclaw.json`:
+   ```jsonc
+   {
+     "gateway": {
+       "port": 18789,
+       "bind": "loopback",
+       "auth": { "token": "your-secret-here" }
+     }
+   }
+   ```
+   Then start it from a separate terminal: `openclaw gateway`. If `gateway` is absent, ChatPanel renders as disabled — the rest of Studio (canvas, file editing, tools/skills tabs) works without it.
 
-Run:
+### Run
 
 ```bash
+git clone git@github.com:ccc330/openclaw-studio.git
+cd openclaw-studio
 npm install
 npm run dev
 ```
 
-Processes:
+Opens at:
 
-- Vite client on `http://localhost:5173`
-- Express + WebSocket backend on `http://localhost:3777`
+- Frontend: `http://localhost:5173`
+- Backend + WS: `http://localhost:3777`
 
-Build:
+### Build (production bundle)
 
 ```bash
 npm run build
 ```
 
-Note: at the time of writing, the client build succeeds, but the full build still hits the existing server-side TypeScript `TS5011` config error from `tsconfig.server.json`.
+Outputs to `dist/client/` (Vite bundle) and `dist/server/` (compiled TS). A clean build is the only verification step in this repo — there are no tests or linters.
+
+## Troubleshooting
+
+**Empty canvas / "No agents found" card.**
+Studio scans `~/.openclaw/`. The server startup log prints the resolved path (`Scanning /Users/foo/.openclaw/ for agents...`). If the directory doesn't exist or `openclaw.json` has no `agents.list`, run `openclaw init` to bootstrap. The card refreshes automatically once an agent is registered.
+
+**Port 3777 already in use.**
+The server prints `Port 3777 is already in use.` and exits cleanly. Either stop whatever is on that port (`lsof -i :3777`), or edit the `PORT` constant in `src/server/index.ts` and the matching `target` in `vite.config.ts` `server.proxy`.
+
+**ChatPanel shows "Gateway unreachable".**
+Studio gave up after 5 reconnect attempts. Check, in order:
+
+1. `~/.openclaw/openclaw.json` has a `gateway` block with `port` set
+2. The Gateway process is actually running (`openclaw gateway`)
+3. If `auth.token` is set, it's a non-empty string
+4. The `bind` value is one of `loopback`, `localhost`, `127.0.0.1`, `0.0.0.0`, `::`, or `*` — Studio rewrites all of these to `127.0.0.1` when dialing
+
+**ChatPanel shows "Auth failed".**
+The token in `~/.openclaw/openclaw.json` `gateway.auth.token` doesn't match what the Gateway is enforcing. Restart `openclaw gateway` after editing the config.
+
+**Bundled skills don't appear in the Skills tab.**
+Studio tries four lookup strategies in order: project-level `npm link`, the running Node binary's own prefix (catches nvm/fnm/volta on Unix without enumerating versions), three hardcoded global prefixes (`~/.npm-global`, `/usr/local`, `/opt/homebrew`), and on Windows `%APPDATA%/npm/node_modules`. If you have a custom `NPM_CONFIG_PREFIX` outside these, `npm link openclaw` inside this project as a workaround.
+
+**Windows.**
+Studio uses `os.homedir()` everywhere (no `$HOME` literals) and handles `%APPDATA%/npm/node_modules` for bundled skills. Should work on Windows ≥ Node 20. File an issue if you hit a platform-specific bug.
 
 ## Upstreaming Note
 
