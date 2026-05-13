@@ -23,6 +23,7 @@ import ContextMenu from './ContextMenu';
 import CreateWizard from './CreateWizard';
 import SymlinkDialog from './SymlinkDialog';
 import ChatPanel from './ChatPanel';
+import EmptyState from './EmptyState';
 import { useGraph } from '../hooks/useGraph';
 import { useLocale } from '../i18n';
 import type { GraphModel, AgentNode as AgentNodeType } from '../hooks/useGraph';
@@ -375,6 +376,10 @@ export default function Canvas() {
         {t('canvas.connecting')}
       </div>
     );
+  }
+
+  if (graph.agents.length === 0) {
+    return <EmptyState />;
   }
 
   return (

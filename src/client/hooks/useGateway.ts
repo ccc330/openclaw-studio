@@ -234,6 +234,7 @@ export function useGateway() {
   const infoRef = useRef<GatewayInfo | null>(null);
   const reqCounterRef = useRef(0);
   const reconnectTimerRef = useRef<number | null>(null);
+  const reconnectAttemptsRef = useRef(0);
   const connectReqIdRef = useRef<string | null>(null);
   const connectNonceRef = useRef<string | null>(null);
   const connectInFlightRef = useRef(false);
@@ -453,6 +454,7 @@ export function useGateway() {
           if (msg.ok) {
             setStatus('ready');
             setErrorDetail(null);
+            reconnectAttemptsRef.current = 0;
             const helloPayload = msg.payload as
               | { snapshot?: { sessionDefaults?: { mainSessionKey?: unknown } } }
               | undefined;
@@ -460,7 +462,13 @@ export function useGateway() {
             if (typeof msk === 'string' && msk) setMainSessionKey(msk);
           } else {
             setStatus('error');
-            setErrorDetail(msg.error?.message || 'Gateway rejected connection');
+            const code = msg.error?.code ?? '';
+            const detail = msg.error?.message;
+            if (/auth|token/i.test(code)) {
+              setErrorDetail(detail || 'Auth failed — check gateway.auth.token in openclaw.json');
+            } else {
+              setErrorDetail(detail || 'Gateway rejected connection');
+            }
           }
           return;
         }
@@ -614,7 +622,8 @@ export function useGateway() {
       };
 
       ws.onerror = () => {
-        setStatus('error');
+        // Don't flip status here — onclose will fire next and decide whether
+        // to reconnect or surface a terminal error. Just record the detail.
         setErrorDetail('WebSocket error');
       };
 
@@ -623,6 +632,12 @@ export function useGateway() {
         connectReqIdRef.current = null;
         connectNonceRef.current = null;
         if (manualCloseRef.current) return;
+        reconnectAttemptsRef.current += 1;
+        if (reconnectAttemptsRef.current >= 5) {
+          setStatus('unavailable');
+          setErrorDetail('Gateway unreachable — verify openclaw gateway is running.');
+          return;
+        }
         setStatus('disconnected');
         if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = window.setTimeout(() => {
