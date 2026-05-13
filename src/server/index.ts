@@ -196,10 +196,14 @@ server.on('error', (err: NodeJS.ErrnoException) => {
 server.listen(PORT, () => {
   console.log(`\n  🦞 OpenClaw Studio server running at http://localhost:${PORT}`);
   console.log(`  📡 WebSocket at ws://localhost:${PORT}/ws`);
-  console.log(`  🔍 Scanning ~/.openclaw/ for agents...\n`);
+  console.log(`  🔍 Scanning ${OPENCLAW_DIR} for agents...\n`);
 
   const graph = scanOpenClaw();
-  console.log(`  Found ${graph.agents.length} agents, ${graph.teams.length} teams, ${graph.edges.length} edges\n`);
+  console.log(`  Found ${graph.agents.length} agents, ${graph.teams.length} teams, ${graph.edges.length} edges`);
+  if (graph.agents.length === 0) {
+    console.log(`  ℹ If ${OPENCLAW_DIR} doesn't exist, run \`openclaw init\` first.`);
+  }
+  console.log('');
 });
 
 process.on('SIGINT', () => {
